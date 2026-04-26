@@ -39,15 +39,6 @@ export class BootScene extends Phaser.Scene {
       frameWidth: 128,
       frameHeight: 96
     });
-    this.load.spritesheet("decor-candles", `${newAssetBase}/candles-runtime.png`, {
-      frameWidth: 64,
-      frameHeight: 64
-    });
-    this.load.spritesheet("decor-candle-flame", `${newAssetBase}/candle-flame-runtime.png`, {
-      frameWidth: 24,
-      frameHeight: 24
-    });
-    this.load.image("decor-candle-glow", `${newAssetBase}/candle-glow-runtime.png`);
 
     this.load.image("ladder-top", `${ladderBase}/ladder-top.png`);
     this.load.image("ladder-middle", `${ladderBase}/ladder-middle.png`);
@@ -90,9 +81,7 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     this.createRect("tile", 32, 32, 0x4b5357, 0x252b2f);
-    this.createShelf();
     this.createCharacterAnimations();
-    this.createDecorAnimations();
     this.scene.start("GameScene");
   }
 
@@ -165,15 +154,6 @@ export class BootScene extends Phaser.Scene {
     }
   }
 
-  private createDecorAnimations(): void {
-    this.anims.create({
-      key: "candle-flame-flicker",
-      frames: this.anims.generateFrameNumbers("decor-candle-flame", { frames: [0, 1, 2, 3] }),
-      frameRate: 7,
-      repeat: -1
-    });
-  }
-
   private createRect(key: string, width: number, height: number, fill: number, stroke: number): void {
     const g = this.add.graphics();
     g.fillStyle(fill, 1);
@@ -181,27 +161,6 @@ export class BootScene extends Phaser.Scene {
     g.lineStyle(2, stroke, 1);
     g.strokeRect(1, 1, width - 2, height - 2);
     g.generateTexture(key, width, height);
-    g.destroy();
-  }
-
-  private createShelf(): void {
-    const g = this.add.graphics();
-    g.fillStyle(0x34241a, 1);
-    g.fillRect(8, 18, 76, 10);
-    g.fillStyle(0x7a5633, 1);
-    g.fillRect(6, 12, 80, 9);
-    g.fillStyle(0xa06b3b, 1);
-    g.fillRect(8, 12, 76, 3);
-    g.fillStyle(0x1c1714, 1);
-    g.fillRect(12, 28, 8, 22);
-    g.fillRect(72, 28, 8, 22);
-    g.fillStyle(0x4a3325, 1);
-    g.fillTriangle(20, 28, 20, 43, 36, 28);
-    g.fillTriangle(72, 28, 72, 43, 56, 28);
-    g.fillStyle(0x111315, 1);
-    g.fillCircle(18, 16, 2);
-    g.fillCircle(74, 16, 2);
-    g.generateTexture("decor-shelf", 92, 56);
     g.destroy();
   }
 

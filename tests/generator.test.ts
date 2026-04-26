@@ -28,6 +28,18 @@ describe("generateLevel", () => {
     }
   });
 
+  it("leaves gaps between adjacent solid room floors", () => {
+    const level = generateLevel({ seed: 222, roomCount: 2 });
+    const firstFloor = level.rooms[0].platforms[0];
+    const secondFloor = level.rooms[1].platforms[0];
+
+    expect(level.rooms.every((room) => room.floorKind === "solid")).toBe(true);
+    expect(firstFloor.x).toBe(level.rooms[0].x);
+    expect(firstFloor.x + firstFloor.width).toBeLessThan(level.rooms[0].x + level.rooms[0].width);
+    expect(secondFloor.x).toBeGreaterThan(level.rooms[1].x);
+    expect(secondFloor.x + secondFloor.width).toBe(level.rooms[1].x + level.rooms[1].width);
+  });
+
   it("varies platform positions across seeds", () => {
     const first = generateLevel({ seed: 1001, roomCount: 5 });
     const second = generateLevel({ seed: 2002, roomCount: 5 });

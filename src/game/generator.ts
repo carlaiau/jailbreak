@@ -4,6 +4,7 @@ import type { EnemySpawn, FloorKind, GeneratedLevel, Platform, Room, SpawnPoint 
 const ROOM_WIDTH = 960;
 const ROOM_HEIGHT = 540;
 const FLOOR_HEIGHT = 36;
+const FLOOR_BOUNDARY_GAP = 84;
 const PLAYER_START_Y = ROOM_HEIGHT - FLOOR_HEIGHT - 48;
 
 export interface GenerateOptions {
@@ -20,7 +21,7 @@ export function generateLevel({ seed, roomCount = 5 }: GenerateOptions): Generat
     const roomX = index * ROOM_WIDTH;
     const roomId = `room-${index}`;
     const floorKind: FloorKind = lavaRooms.has(index) ? "lava" : "solid";
-    const platforms = buildPlatforms(rng, roomId, roomX, index, floorKind);
+    const platforms = buildPlatforms(rng, roomId, roomX, index, floorKind, roomCount);
     const spawnPlatform = platforms[0];
     const upperPlatform = platforms[platforms.length - 1];
     const spawnPoint = buildSpawnPoint(roomId, index, roomX, spawnPlatform, floorKind);
@@ -116,20 +117,23 @@ function buildPlatforms(
   roomId: string,
   roomX: number,
   index: number,
-  floorKind: FloorKind
+  floorKind: FloorKind,
+  roomCount: number
 ): Platform[] {
   if (floorKind === "lava") {
     return buildLavaRoomPlatforms(rng, roomId, roomX, index);
   }
 
+  const leftGap = index === 0 ? 0 : FLOOR_BOUNDARY_GAP;
+  const rightGap = index === roomCount - 1 ? 0 : FLOOR_BOUNDARY_GAP;
   const floor: Platform = {
     id: `${roomId}-floor`,
-    x: roomX,
+    x: roomX + leftGap,
     y: ROOM_HEIGHT - FLOOR_HEIGHT,
-    width: ROOM_WIDTH,
+    width: ROOM_WIDTH - leftGap - rightGap,
     height: FLOOR_HEIGHT,
-    patrolStart: roomX + 80,
-    patrolEnd: roomX + ROOM_WIDTH - 100
+    patrolStart: roomX + leftGap + 80,
+    patrolEnd: roomX + ROOM_WIDTH - rightGap - 100
   };
 
   const lowX = roomX + 165 + rng.integer(-55, 75);

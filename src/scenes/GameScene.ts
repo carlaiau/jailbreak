@@ -15,6 +15,7 @@ type ControlSet = {
   left: Phaser.Input.Keyboard.Key;
   right: Phaser.Input.Keyboard.Key;
   up: Phaser.Input.Keyboard.Key;
+  down: Phaser.Input.Keyboard.Key;
   punch: Phaser.Input.Keyboard.Key;
   kick: Phaser.Input.Keyboard.Key;
   hide: Phaser.Input.Keyboard.Key;
@@ -29,6 +30,8 @@ type PlayerActor = {
   facing: 1 | -1;
   health: number;
   spawn: SpawnPoint;
+  climbing: boolean;
+  activeLadder?: LadderZone;
   damageCooldownUntil: number;
   attackCooldownUntil: number;
   animationLockUntil: number;
@@ -52,9 +55,17 @@ type EnemyActor = {
 
 type PlayerCount = 1 | 2;
 
+type LadderZone = {
+  x: number;
+  topY: number;
+  bottomY: number;
+  width: number;
+};
+
 const PLAYER_SPEED = 185;
 const HIDDEN_SPEED = 105;
 const JUMP_SPEED = -580;
+const CLIMB_SPEED = 145;
 const DAMAGE_COOLDOWN = 900;
 const ATTACK_COOLDOWN = 330;
 
@@ -62,6 +73,7 @@ export class GameScene extends Phaser.Scene {
   private level!: GeneratedLevel;
   private platforms!: Phaser.Physics.Arcade.StaticGroup;
   private lavaZones!: Phaser.Physics.Arcade.StaticGroup;
+  private ladderZones: LadderZone[] = [];
   private crates!: Phaser.GameObjects.Group;
   private enemies!: Phaser.Physics.Arcade.Group;
   private players: PlayerActor[] = [];
@@ -233,8 +245,6 @@ export class GameScene extends Phaser.Scene {
     const ventY = 250 + this.seededInt(room.index, 181, 180);
     this.add.image(ventX, ventY, "bg-wall-vent").setAlpha(0.82).setDepth(-16);
 
-    this.addRoomCandleShelves(room);
-
     const pipeScale = 0.55;
     const pipeBaseX = room.x + 28 + this.seededInt(room.index, 230, 48);
     const pipeBaseY = this.level.roomHeight - 72;
@@ -264,73 +274,6 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private addRoomCandleShelves(room: Room): void {
-    const candleCount = room.floorKind === "lava"
-      ? 1 + this.seededInt(room.index, 600, 2)
-      : 1 + this.seededInt(room.index, 600, 3);
-    const flameOffsets = [
-      { x: -2, y: -29 },
-      { x: -8, y: -35 },
-      { x: 0, y: -22 },
-      { x: 1, y: -32 }
-    ];
-
-    for (let i = 0; i < candleCount; i += 1) {
-      const frame = this.seededInt(room.index, 620 + i, 4);
-      const x = room.x + 118 + this.seededInt(room.index, 630 + i, room.width - 236);
-      const y = 168 + this.seededInt(room.index, 635 + i, 214);
-      const glowScale = 0.48 + this.seededInt(room.index, 640 + i, 18) / 100;
-      const candleScale = 0.5 + this.seededInt(room.index, 650 + i, 9) / 100;
-      const flameOffset = flameOffsets[frame];
-
-      this.add
-        .image(x, y, "decor-shelf")
-        .setScale(0.82)
-        .setAlpha(0.9)
-        .setDepth(-15);
-
-      const glow = this.add
-        .image(x, y - 27, "decor-candle-glow")
-        .setScale(glowScale)
-        .setAlpha(0.2)
-        .setBlendMode(Phaser.BlendModes.ADD)
-        .setDepth(-14);
-      this.addFlicker(glow, room, 660 + i, 0.13, 0.25);
-
-      const candleY = y - 15;
-      this.add
-        .image(x, candleY, "decor-candles", frame)
-        .setOrigin(0.5, 1)
-        .setScale(candleScale)
-        .setDepth(-13);
-
-      const flame = this.add
-        .sprite(x + flameOffset.x, candleY + flameOffset.y, "decor-candle-flame")
-        .setScale(0.48)
-        .setDepth(-12)
-        .play("candle-flame-flicker");
-      this.addFlicker(flame, room, 670 + i, 0.72, 1);
-    }
-  }
-
-  private addFlicker(
-    target: Phaser.GameObjects.Components.Alpha,
-    room: Room,
-    salt: number,
-    minAlpha: number,
-    maxAlpha: number
-  ): void {
-    this.tweens.add({
-      targets: target,
-      alpha: { from: minAlpha, to: maxAlpha },
-      duration: 420 + this.seededInt(room.index, salt, 460),
-      delay: this.seededInt(room.index, salt + 1, 220),
-      yoyo: true,
-      repeat: -1,
-      ease: "Sine.easeInOut"
-    });
-  }
-
   private seededInt(roomIndex: number, salt: number, maxExclusive: number): number {
     const value = Math.sin((this.level.seed + 1) * 12.9898 + roomIndex * 78.233 + salt * 37.719);
     return Math.floor((value - Math.floor(value)) * maxExclusive);
@@ -355,7 +298,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private renderPlatformArt(platform: Platform): void {
-    if (platform.height >= 32 && platform.width >= this.level.roomWidth - 1) {
+    if (platform.height >= 32) {
       this.renderFloorArt(platform);
       return;
     }
@@ -364,19 +307,20 @@ export class GameScene extends Phaser.Scene {
   }
 
   private addPlatformFoliage(platform: Platform, room: Room): void {
-    const isFloor = platform.height >= 32 && platform.width >= this.level.roomWidth - 1;
+    const isFloor = platform.height >= 32;
     const platformIndex = Math.max(0, room.platforms.findIndex((candidate) => candidate.id === platform.id));
     const baseCount = isFloor
       ? 4 + this.seededInt(room.index, 700 + platformIndex, 4)
       : 1 + this.seededInt(room.index, 700 + platformIndex, 3);
     const count = room.floorKind === "lava" ? Math.max(1, baseCount - 1) : baseCount;
-    const floorFrames = [0, 2, 3, 4, 5, 6, 7];
+    const foliageFrames = [0, 1, 2, 4, 5, 7];
+    const floorFrames = [0, 2, 4, 5, 7];
 
     for (let i = 0; i < count; i += 1) {
       const salt = 720 + platformIndex * 31 + i * 9;
       const frame = isFloor
         ? floorFrames[this.seededInt(room.index, salt, floorFrames.length)]
-        : this.seededInt(room.index, salt, 8);
+        : foliageFrames[this.seededInt(room.index, salt, foliageFrames.length)];
       const span = Math.max(1, platform.width - 72);
       const x = platform.x + 36 + this.seededInt(room.index, salt + 1, span);
       const scale = 0.43 + this.seededInt(room.index, salt + 2, 16) / 100;
@@ -446,13 +390,15 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createLadders(): void {
+    this.ladderZones = [];
+
     for (const room of this.level.rooms) {
       const platforms = [...room.platforms].sort((a, b) => b.y - a.y);
       const ladderPairs = platforms
         .slice(0, -1)
         .map((lower, index) => ({ lower, upper: platforms[index + 1] }))
         .filter(({ lower, upper }) => lower.y - upper.y >= 80)
-        .slice(0, room.floorKind === "lava" ? 2 : 1);
+        .slice(0, 2);
 
       for (const { lower, upper } of ladderPairs) {
         const overlapStart = Math.max(lower.x + 42, upper.x + 42);
@@ -466,6 +412,8 @@ export class GameScene extends Phaser.Scene {
 
   private renderLadder(x: number, topY: number, bottomY: number): void {
     const height = Math.max(64, bottomY - topY);
+    this.ladderZones.push({ x, topY, bottomY, width: 48 });
+
     this.add
       .tileSprite(x, topY, 48, height, "ladder-shadow")
       .setOrigin(0.5, 0)
@@ -534,6 +482,7 @@ export class GameScene extends Phaser.Scene {
       left: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
       right: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
       up: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
+      down: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
       punch: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R),
       kick: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.T),
       hide: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E)
@@ -546,6 +495,7 @@ export class GameScene extends Phaser.Scene {
         left: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT),
         right: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT),
         up: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
+        down: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN),
         punch: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.PERIOD),
         kick: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.FORWARD_SLASH),
         hide: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT)
@@ -590,6 +540,7 @@ export class GameScene extends Phaser.Scene {
       facing: 1,
       health: 3,
       spawn,
+      climbing: false,
       damageCooldownUntil: 0,
       attackCooldownUntil: 0,
       animationLockUntil: 0
@@ -739,8 +690,12 @@ export class GameScene extends Phaser.Scene {
     const body = player.sprite.body as Phaser.Physics.Arcade.Body;
     this.updatePlayerRoomSpawn(player);
     const speed = player.status.hidden ? HIDDEN_SPEED : PLAYER_SPEED;
+    const ladder = this.getPlayerLadder(player);
     const left = player.controls.left.isDown;
     const right = player.controls.right.isDown;
+    const up = player.controls.up.isDown;
+    const down = player.controls.down.isDown;
+    const climbing = this.updatePlayerLadderMovement(player, ladder, up, down, left, right);
 
     if (left === right) {
       player.sprite.setAccelerationX(0);
@@ -753,7 +708,7 @@ export class GameScene extends Phaser.Scene {
       player.facing = 1;
     }
 
-    if (Phaser.Input.Keyboard.JustDown(player.controls.up) && body.blocked.down) {
+    if (Phaser.Input.Keyboard.JustDown(player.controls.up) && body.blocked.down && !climbing && !ladder) {
       player.sprite.setVelocityY(JUMP_SPEED);
     }
 
@@ -776,6 +731,78 @@ export class GameScene extends Phaser.Scene {
       .setPosition(player.sprite.x, player.sprite.y + 3)
       .setVisible(player.status.hidden)
       .setFlipX(player.facing === -1);
+
+    this.checkVoidFall(player, time);
+  }
+
+  private updatePlayerLadderMovement(
+    player: PlayerActor,
+    ladder: LadderZone | undefined,
+    up: boolean,
+    down: boolean,
+    left: boolean,
+    right: boolean
+  ): boolean {
+    const body = player.sprite.body as Phaser.Physics.Arcade.Body;
+    const wantsClimb = Boolean(ladder && (up || down || (player.climbing && left === right)));
+
+    if (!wantsClimb || !ladder) {
+      if (player.climbing) {
+        player.climbing = false;
+        player.activeLadder = undefined;
+        body.setAllowGravity(true);
+        body.checkCollision.up = true;
+        body.checkCollision.down = true;
+      }
+      return false;
+    }
+
+    player.climbing = true;
+    player.activeLadder = ladder;
+    player.status.hidden = false;
+    body.setAllowGravity(false);
+    body.checkCollision.up = false;
+    body.checkCollision.down = false;
+
+    const centeredX = Phaser.Math.Linear(player.sprite.x, ladder.x, 0.18);
+    player.sprite.setX(centeredX);
+
+    if (up === down) {
+      player.sprite.setVelocityY(0);
+    } else {
+      player.sprite.setVelocityY(up ? -CLIMB_SPEED : CLIMB_SPEED);
+    }
+
+    return true;
+  }
+
+  private getPlayerLadder(player: PlayerActor): LadderZone | undefined {
+    const activeLadder = player.activeLadder;
+    if (activeLadder && this.isPlayerOnLadder(player, activeLadder, 36)) {
+      return activeLadder;
+    }
+
+    return this.ladderZones.find((ladder) => this.isPlayerOnLadder(player, ladder, 24));
+  }
+
+  private isPlayerOnLadder(player: PlayerActor, ladder: LadderZone, padding: number): boolean {
+    return (
+      Math.abs(player.sprite.x - ladder.x) <= ladder.width * 0.5 + 12 &&
+      player.sprite.y >= ladder.topY - padding &&
+      player.sprite.y <= ladder.bottomY + padding
+    );
+  }
+
+  private checkVoidFall(player: PlayerActor, time: number): void {
+    if (player.sprite.y <= this.level.roomHeight - 30) {
+      return;
+    }
+
+    if (time >= player.damageCooldownUntil) {
+      player.health -= 1;
+      player.damageCooldownUntil = time + DAMAGE_COOLDOWN;
+    }
+    this.respawnPlayer(player, player.health <= 0);
   }
 
   private updatePlayerAnimation(
@@ -790,6 +817,8 @@ export class GameScene extends Phaser.Scene {
     const texture = player.sprite.texture.key;
     if (player.damageCooldownUntil > time && player.health <= 1) {
       player.sprite.play(`${texture}-hurt`, true);
+    } else if (player.climbing) {
+      player.sprite.play(`${texture}-idle`, true);
     } else if (!body.blocked.down) {
       player.sprite.play(`${texture}-jump`, true);
     } else if (Math.abs(body.velocity.x) > 8) {
@@ -1032,10 +1061,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   private respawnPlayer(player: PlayerActor, restoreHealth: boolean): void {
+    const body = player.sprite.body as Phaser.Physics.Arcade.Body;
     if (restoreHealth) {
       player.health = 3;
     }
     player.status.hidden = false;
+    player.climbing = false;
+    player.activeLadder = undefined;
+    body.setAllowGravity(true);
+    body.checkCollision.up = true;
+    body.checkCollision.down = true;
     player.sprite.setPosition(player.spawn.x, player.spawn.y);
     player.sprite.setVelocity(0, 0);
     player.damageCooldownUntil = this.time.now + 1200;

@@ -11,16 +11,8 @@ export function enemyTargeting(
     return { canSee: false, canDamage: false, reason: "out-of-range" };
   }
 
-  if (player.hasKey && enemy.kind === "monster") {
-    return { canSee: false, canDamage: false, reason: "key-carrier" };
-  }
-
   if (player.hidden && now > enemy.alertedUntil && now > player.recentlyAttackedUntil) {
     return { canSee: false, canDamage: false, reason: "hidden" };
-  }
-
-  if (player.hasKey) {
-    return { canSee: true, canDamage: false, reason: "key-carrier" };
   }
 
   return { canSee: true, canDamage: true, reason: "visible" };

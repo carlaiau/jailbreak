@@ -93,5 +93,5 @@ export interface EnemyStatus {
 export interface TargetingDecision {
   canSee: boolean;
   canDamage: boolean;
-  reason: "visible" | "hidden" | "key-carrier" | "out-of-range";
+  reason: "visible" | "hidden" | "out-of-range";
 }

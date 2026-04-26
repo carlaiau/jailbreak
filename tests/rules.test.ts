@@ -32,21 +32,21 @@ describe("enemyTargeting", () => {
     });
   });
 
-  it("makes monsters ignore the key carrier", () => {
+  it("lets monsters damage the key carrier", () => {
     expect(
       enemyTargeting(monster, { ...basePlayer, hasKey: true }, 80, 1000)
     ).toMatchObject({
-      canSee: false,
-      canDamage: false,
-      reason: "key-carrier"
+      canSee: true,
+      canDamage: true,
+      reason: "visible"
     });
   });
 
-  it("lets guards see but not damage the key carrier", () => {
+  it("lets guards damage the key carrier", () => {
     expect(enemyTargeting(guard, { ...basePlayer, hasKey: true }, 80, 1000)).toMatchObject({
       canSee: true,
-      canDamage: false,
-      reason: "key-carrier"
+      canDamage: true,
+      reason: "visible"
     });
   });
 
