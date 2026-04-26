@@ -50,6 +50,8 @@ type EnemyActor = {
   attackCooldownUntil: number;
 };
 
+type PlayerCount = 1 | 2;
+
 const PLAYER_SPEED = 185;
 const HIDDEN_SPEED = 105;
 const JUMP_SPEED = -580;
@@ -69,14 +71,17 @@ export class GameScene extends Phaser.Scene {
   private hud!: Phaser.GameObjects.Text;
   private statusText!: Phaser.GameObjects.Text;
   private won = false;
+  private playerCount: PlayerCount = 2;
 
   constructor() {
     super("GameScene");
   }
 
-  create(): void {
+  create(data?: { playerCount?: PlayerCount }): void {
     const seedParam = new URLSearchParams(window.location.search).get("seed");
+    const playerCountParam = new URLSearchParams(window.location.search).get("players");
     const seed = seedParam ? Number(seedParam) : Date.now() % 1000000;
+    this.playerCount = data?.playerCount ?? (playerCountParam === "1" ? 1 : 2);
     this.level = generateLevel({ seed: Number.isFinite(seed) ? seed : 1984, roomCount: 5 });
     this.won = false;
     this.enemyActors = [];
@@ -100,9 +105,8 @@ export class GameScene extends Phaser.Scene {
     this.createHud();
     this.wireCollisions();
 
-    this.input.keyboard?.on("keydown-ONE", () => {
-      this.scene.restart();
-    });
+    this.input.keyboard?.on("keydown-ONE", () => this.switchPlayerCount(1));
+    this.input.keyboard?.on("keydown-TWO", () => this.switchPlayerCount(2));
   }
 
   update(time: number): void {
@@ -119,14 +123,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private createBackground(): void {
-    const worldWidth = this.level.rooms.length * this.level.roomWidth;
-    this.add
-      .tileSprite(0, 0, worldWidth, this.level.roomHeight, "bg-wall-tile")
-      .setOrigin(0)
-      .setDepth(-40);
+    this.addWallBaseTiles();
 
     for (const room of this.level.rooms) {
-      this.addRoomWallVariants(room);
+      this.addRoomNumberGraffiti(room);
       this.addRoomWindows(room);
       this.addRoomDecor(room);
       if (room.index < this.level.rooms.length - 1) {
@@ -142,39 +142,89 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private addRoomWallVariants(room: Room): void {
-    const count = 5 + this.seededInt(room.index, 10, 4);
+  private addRoomNumberGraffiti(room: Room): void {
+    const x = room.x + 250 + this.seededInt(room.index, 500, Math.max(1, room.width - 500));
+    const y = 150 + this.seededInt(room.index, 501, 210);
+    const rotation = Phaser.Math.DegToRad(this.seededInt(room.index, 502, 23) - 11);
+    const label = String(room.index + 1).padStart(2, "0");
+    const paint = 0x6f7d79;
 
-    for (let i = 0; i < count; i += 1) {
-      const x = room.x + 96 + this.seededInt(room.index, 20 + i, room.width - 192);
-      const y = 96 + this.seededInt(room.index, 40 + i, room.height - 220);
-      const frame = this.seededInt(room.index, 60 + i, 8);
-      const alpha = 0.38 + this.seededInt(room.index, 80 + i, 28) / 100;
+    this.add
+      .text(x, y, label, {
+        fontFamily: "Impact, ui-monospace, monospace",
+        fontSize: "76px",
+        fontStyle: "900",
+        color: "#6f7d79",
+        stroke: "#0a1214",
+        strokeThickness: 3
+      })
+      .setOrigin(0.5)
+      .setRotation(rotation)
+      .setAlpha(0.34)
+      .setDepth(-17);
 
+    for (let i = 0; i < 9; i += 1) {
+      const dotX = x + this.seededInt(room.index, 520 + i, 120) - 60;
+      const dotY = y + this.seededInt(room.index, 540 + i, 92) - 46;
       this.add
-        .image(x, y, "bg-wall-variants", frame)
-        .setAlpha(alpha)
-        .setDepth(-35);
+        .circle(dotX, dotY, 1 + this.seededInt(room.index, 560 + i, 3), paint, 0.16)
+        .setDepth(-17);
+    }
+  }
+
+  private addWallBaseTiles(): void {
+    const tileSize = 128;
+    const worldWidth = this.level.rooms.length * this.level.roomWidth;
+    const columns = Math.ceil(worldWidth / tileSize);
+    const rows = Math.ceil(this.level.roomHeight / tileSize);
+    const tints = [0xffffff, 0xeaf6f1, 0xe9f0ff, 0xdff2ec];
+
+    for (let row = 0; row < rows; row += 1) {
+      for (let column = 0; column < columns; column += 1) {
+        const roomIndex = Math.min(this.level.rooms.length - 1, Math.floor((column * tileSize) / this.level.roomWidth));
+        const salt = 300 + column * 37 + row * 71;
+        const useVariant = this.seededInt(roomIndex, salt + 4, 100) < 34;
+        const wallTile = useVariant
+          ? this.add.image(
+              column * tileSize,
+              row * tileSize,
+              "bg-wall-variants",
+              this.seededInt(roomIndex, salt + 5, 8)
+            )
+          : this.add.image(column * tileSize, row * tileSize, "bg-wall-tile");
+
+        wallTile
+          .setOrigin(0)
+          .setDepth(-40)
+          .setAlpha(0.95 + this.seededInt(roomIndex, salt, 6) / 100)
+          .setTint(tints[this.seededInt(roomIndex, salt + 1, tints.length)]);
+
+        wallTile.setFlipX(this.seededInt(roomIndex, salt + 2, 2) === 0);
+        wallTile.setFlipY(this.seededInt(roomIndex, salt + 3, 4) === 0);
+      }
     }
   }
 
   private addRoomWindows(room: Room): void {
-    const windowCount = room.index % 2 === 0 ? 2 : 1;
+    const windowCount = room.index % 2 === 0 ? 4 : 2;
+    const windowScale = 0.72;
+    const beamScale = 0.7;
 
     for (let i = 0; i < windowCount; i += 1) {
       const x =
         room.x +
-        (windowCount === 1 ? room.width * 0.5 : room.width * (0.24 + i * 0.34)) +
-        this.seededInt(room.index, 100 + i, 38) -
-        19;
-      const y = 58 + this.seededInt(room.index, 120 + i, 18);
+        room.width * ((i + 1) / (windowCount + 1)) +
+        this.seededInt(room.index, 100 + i, 34) -
+        17;
+      const y = 50 + this.seededInt(room.index, 120 + i, 34);
 
       this.add
-        .image(x, y + 134, "bg-window-light-beam")
+        .image(x, y + 96, "bg-window-light-beam")
+        .setScale(beamScale)
         .setAlpha(0.42)
         .setBlendMode(Phaser.BlendModes.ADD)
         .setDepth(-28);
-      this.add.image(x, y, "bg-barred-window").setDepth(-18);
+      this.add.image(x, y, "bg-barred-window").setScale(windowScale).setDepth(-18);
     }
   }
 
@@ -183,16 +233,7 @@ export class GameScene extends Phaser.Scene {
     const ventY = 250 + this.seededInt(room.index, 181, 180);
     this.add.image(ventX, ventY, "bg-wall-vent").setAlpha(0.82).setDepth(-16);
 
-    if (room.index % 2 === 0) {
-      const lanternX = room.x + 78 + this.seededInt(room.index, 210, 72);
-      const lanternY = this.level.roomHeight - 246 - this.seededInt(room.index, 211, 90);
-      this.add
-        .image(lanternX, lanternY, "bg-lantern-glow")
-        .setAlpha(0.52)
-        .setBlendMode(Phaser.BlendModes.ADD)
-        .setDepth(-22);
-      this.add.image(lanternX, lanternY, "bg-lantern").setDepth(-14);
-    }
+    this.addRoomCandleShelves(room);
 
     const pipeScale = 0.55;
     const pipeBaseX = room.x + 28 + this.seededInt(room.index, 230, 48);
@@ -223,6 +264,73 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private addRoomCandleShelves(room: Room): void {
+    const candleCount = room.floorKind === "lava"
+      ? 1 + this.seededInt(room.index, 600, 2)
+      : 1 + this.seededInt(room.index, 600, 3);
+    const flameOffsets = [
+      { x: -2, y: -29 },
+      { x: -8, y: -35 },
+      { x: 0, y: -22 },
+      { x: 1, y: -32 }
+    ];
+
+    for (let i = 0; i < candleCount; i += 1) {
+      const frame = this.seededInt(room.index, 620 + i, 4);
+      const x = room.x + 118 + this.seededInt(room.index, 630 + i, room.width - 236);
+      const y = 168 + this.seededInt(room.index, 635 + i, 214);
+      const glowScale = 0.48 + this.seededInt(room.index, 640 + i, 18) / 100;
+      const candleScale = 0.5 + this.seededInt(room.index, 650 + i, 9) / 100;
+      const flameOffset = flameOffsets[frame];
+
+      this.add
+        .image(x, y, "decor-shelf")
+        .setScale(0.82)
+        .setAlpha(0.9)
+        .setDepth(-15);
+
+      const glow = this.add
+        .image(x, y - 27, "decor-candle-glow")
+        .setScale(glowScale)
+        .setAlpha(0.2)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(-14);
+      this.addFlicker(glow, room, 660 + i, 0.13, 0.25);
+
+      const candleY = y - 15;
+      this.add
+        .image(x, candleY, "decor-candles", frame)
+        .setOrigin(0.5, 1)
+        .setScale(candleScale)
+        .setDepth(-13);
+
+      const flame = this.add
+        .sprite(x + flameOffset.x, candleY + flameOffset.y, "decor-candle-flame")
+        .setScale(0.48)
+        .setDepth(-12)
+        .play("candle-flame-flicker");
+      this.addFlicker(flame, room, 670 + i, 0.72, 1);
+    }
+  }
+
+  private addFlicker(
+    target: Phaser.GameObjects.Components.Alpha,
+    room: Room,
+    salt: number,
+    minAlpha: number,
+    maxAlpha: number
+  ): void {
+    this.tweens.add({
+      targets: target,
+      alpha: { from: minAlpha, to: maxAlpha },
+      duration: 420 + this.seededInt(room.index, salt, 460),
+      delay: this.seededInt(room.index, salt + 1, 220),
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut"
+    });
+  }
+
   private seededInt(roomIndex: number, salt: number, maxExclusive: number): number {
     const value = Math.sin((this.level.seed + 1) * 12.9898 + roomIndex * 78.233 + salt * 37.719);
     return Math.floor((value - Math.floor(value)) * maxExclusive);
@@ -239,6 +347,10 @@ export class GameScene extends Phaser.Scene {
       body.setData("platformId", platform.id);
 
       this.renderPlatformArt(platform);
+      const room = this.getRoomForX(platform.x + platform.width * 0.5);
+      if (room) {
+        this.addPlatformFoliage(platform, room);
+      }
     }
   }
 
@@ -251,19 +363,59 @@ export class GameScene extends Phaser.Scene {
     this.renderFloatingPlatformArt(platform);
   }
 
+  private addPlatformFoliage(platform: Platform, room: Room): void {
+    const isFloor = platform.height >= 32 && platform.width >= this.level.roomWidth - 1;
+    const platformIndex = Math.max(0, room.platforms.findIndex((candidate) => candidate.id === platform.id));
+    const baseCount = isFloor
+      ? 4 + this.seededInt(room.index, 700 + platformIndex, 4)
+      : 1 + this.seededInt(room.index, 700 + platformIndex, 3);
+    const count = room.floorKind === "lava" ? Math.max(1, baseCount - 1) : baseCount;
+    const floorFrames = [0, 2, 3, 4, 5, 6, 7];
+
+    for (let i = 0; i < count; i += 1) {
+      const salt = 720 + platformIndex * 31 + i * 9;
+      const frame = isFloor
+        ? floorFrames[this.seededInt(room.index, salt, floorFrames.length)]
+        : this.seededInt(room.index, salt, 8);
+      const span = Math.max(1, platform.width - 72);
+      const x = platform.x + 36 + this.seededInt(room.index, salt + 1, span);
+      const scale = 0.43 + this.seededInt(room.index, salt + 2, 16) / 100;
+      const foliage = this.add
+        .image(x, frame === 1 ? platform.y - 6 : platform.y + 5, "decor-foliage", frame)
+        .setScale(scale)
+        .setAlpha(0.82 + this.seededInt(room.index, salt + 3, 14) / 100)
+        .setFlipX(this.seededInt(room.index, salt + 4, 2) === 0)
+        .setDepth(frame === 1 ? 0.95 : 1.55);
+
+      if (frame === 1) {
+        foliage.setOrigin(0.5, 0);
+      } else {
+        foliage.setOrigin(0.5, 1);
+      }
+    }
+  }
+
   private renderFloorArt(platform: Platform): void {
     const y = platform.y - 4;
     const pieceWidth = 64;
+    const pieceHeight = 48;
+    const sourceScale = 0.25;
     const middleWidth = Math.max(pieceWidth, platform.width - pieceWidth * 2);
 
-    this.add.image(platform.x, y, "floor-edge-left").setOrigin(0, 0).setDepth(1);
     this.add
-      .tileSprite(platform.x + pieceWidth, y, middleWidth, 48, "floor-edge-middle")
+      .image(platform.x, y, "floor-edge-left")
       .setOrigin(0, 0)
+      .setDisplaySize(pieceWidth, pieceHeight)
+      .setDepth(1);
+    this.add
+      .tileSprite(platform.x + pieceWidth, y, middleWidth, pieceHeight, "floor-edge-middle")
+      .setOrigin(0, 0)
+      .setTileScale(sourceScale, sourceScale)
       .setDepth(1);
     this.add
       .image(platform.x + platform.width - pieceWidth, y, "floor-edge-right")
       .setOrigin(0, 0)
+      .setDisplaySize(pieceWidth, pieceHeight)
       .setDepth(1);
   }
 
@@ -387,16 +539,20 @@ export class GameScene extends Phaser.Scene {
       hide: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E)
     });
 
-    const p2 = this.createPlayer("p2", "player-p2", this.level.playerSpawns.p2, {
-      left: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT),
-      right: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT),
-      up: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
-      punch: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.PERIOD),
-      kick: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.FORWARD_SLASH),
-      hide: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT)
-    });
+    this.players.push(p1);
 
-    this.players.push(p1, p2);
+    if (this.playerCount === 2) {
+      const p2 = this.createPlayer("p2", "player-p2", this.level.playerSpawns.p2, {
+        left: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.LEFT),
+        right: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.RIGHT),
+        up: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
+        punch: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.PERIOD),
+        kick: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.FORWARD_SLASH),
+        hide: keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT)
+      });
+
+      this.players.push(p2);
+    }
   }
 
   private createPlayer(
@@ -928,6 +1084,19 @@ export class GameScene extends Phaser.Scene {
     this.physics.pause();
   }
 
+  private switchPlayerCount(playerCount: PlayerCount): void {
+    if (playerCount === this.playerCount) {
+      this.scene.restart({ playerCount });
+      return;
+    }
+
+    this.playerCount = playerCount;
+    const url = new URL(window.location.href);
+    url.searchParams.set("players", String(playerCount));
+    window.history.replaceState({}, "", url);
+    this.scene.restart({ playerCount });
+  }
+
   private killEnemy(enemy: EnemyActor): void {
     this.enemyActors = this.enemyActors.filter((candidate) => candidate !== enemy);
     enemy.sprite.disableBody(true, true);
@@ -982,7 +1151,7 @@ export class GameScene extends Phaser.Scene {
       return `${player.id.toUpperCase()} HP ${player.health} ${box} ${key}`;
     });
     this.hud.setText([
-      `SEED ${this.level.seed}`,
+      `SEED ${this.level.seed}   ${this.playerCount}P MODE`,
       `KEY ${keyHolder}   ENEMIES ${enemyCount}`,
       ...playerLines
     ]);
